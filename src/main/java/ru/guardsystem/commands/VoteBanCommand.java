@@ -23,8 +23,11 @@ public class VoteBanCommand implements TabExecutor {
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
-        sender.sendMessage("VoteBan command is wired. Active sessions: " + sessionManager.getActiveSessionCount());
-        voteManager.touch();
+        String target = args.length > 0 ? args[0] : "unknown";
+        String sessionId = sessionManager.startSession("voteban", sender.getName());
+        voteManager.startVoteBan(sessionId, sender.getName(), target);
+        sender.sendMessage("VoteBan initiated for " + target + ". Active sessions: " + sessionManager.getActiveSessionCount());
+        sessionManager.finishSession(sessionId);
         return true;
     }
 

@@ -13,7 +13,7 @@ public class VoteManager {
 
     public void load() {
         this.votesJson = persistenceLayer.loadVotesJson();
-        auditLogger.log("VoteManager loaded votes.json");
+        auditLogger.logEvent("vote_result", "system-load", java.util.Map.of("message", "VoteManager loaded votes.json"));
     }
 
     public void save() {
@@ -21,10 +21,24 @@ public class VoteManager {
             return;
         }
         persistenceLayer.saveVotesJson(votesJson);
-        auditLogger.log("VoteManager saved votes.json");
+        auditLogger.logEvent("vote_result", "system-save", java.util.Map.of("message", "VoteManager saved votes.json"));
     }
 
-    public void touch() {
-        auditLogger.log("VoteManager touch called");
+    public void startVoteBan(String sessionId, String initiator, String target) {
+        auditLogger.logEvent("voteban_initiated", sessionId, java.util.Map.of(
+                "initiator", initiator,
+                "target", target
+        ));
+    }
+
+    public void castVote(String sessionId, String voter, String choice) {
+        auditLogger.logEvent("vote_cast", sessionId, java.util.Map.of(
+                "voter", voter,
+                "choice", choice
+        ));
+    }
+
+    public void registerVoteResult(String sessionId, String result) {
+        auditLogger.logEvent("vote_result", sessionId, java.util.Map.of("result", result));
     }
 }
