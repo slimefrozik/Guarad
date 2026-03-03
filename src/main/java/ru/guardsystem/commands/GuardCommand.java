@@ -6,12 +6,14 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import ru.guardsystem.service.CoreProtectService;
 import ru.guardsystem.service.GuardManager;
-import ru.guardsystem.service.VoteManager;
+import ru.guardsystem.service.SessionManager;
 
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -23,119 +25,165 @@ public class GuardCommand implements TabExecutor {
 
     private final JavaPlugin plugin;
     private final GuardManager guardManager;
-    private final VoteManager voteManager;
+    private final SessionManager sessionManager;
+    private final CoreProtectService coreProtectService;
 
-    public GuardCommand(JavaPlugin plugin, GuardManager guardManager, VoteManager voteManager) {
-        this.plugin = plugin;
+    public GuardCommand(GuardManager guardManager, SessionManager sessionManager, CoreProtectService coreProtectService) {
         this.guardManager = guardManager;
-        this.voteManager = voteManager;
+        this.sessionManager = sessionManager;
+        this.coreProtectService = coreProtectService;
     }
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
-        if (args.length != 2) {
-            sender.sendMessage("[Guard] Использование: /guard nominate <nick> | /guard impeach <nick>");
-            return true;
-        }
-
-        String action = args[0].toLowerCase(Locale.ROOT);
-        String target = args[1];
-
         if (!(sender instanceof Player player)) {
-            sender.sendMessage("[Guard] Команда только для игроков.");
+            sender.sendMessage("Команда доступна только игрокам.");
             return true;
         }
 
-        if ("nominate".equals(action)) {
-            handleNominate(player, target);
+        if (args.length == 0) {
+            sender.sendMessage("Использование: /guard inspect <player> <radius> <hours> | /guard rollback <request|execute|status> ...");
             return true;
         }
 
-        if ("impeach".equals(action)) {
-            handleImpeach(player, target);
+        return switch (args[0].toLowerCase()) {
+            case "inspect" -> handleInspect(player, args);
+            case "rollback" -> handleRollback(player, args);
+            default -> {
+                sender.sendMessage("Неизвестная подкоманда guard.");
+                yield true;
+            }
+        };
+    }
+
+    private boolean handleInspect(Player sender, String[] args) {
+        if (args.length != 4) {
+            sender.sendMessage("Использование: /guard inspect <player> <radius> <hours>");
             return true;
         }
 
-        sender.sendMessage("[Guard] Неизвестное действие. Доступно: nominate, impeach");
+        String target = args[1];
+        Integer radius = parsePositiveInt(args[2]);
+        Integer hours = parsePositiveInt(args[3]);
+        if (radius == null || hours == null) {
+            sender.sendMessage("radius/hours должны быть положительными числами.");
+            return true;
+        }
+
+        int seconds = Math.toIntExact(Duration.of(hours, ChronoUnit.HOURS).toSeconds());
+        if (!sessionManager.validateRollbackLimits(radius, seconds)) {
+            sender.sendMessage("Лимиты превышены: radius <= 50, глубина <= 7 дней.");
+            return true;
+        }
+
+        List<?> results = coreProtectService.inspect(sender, target, radius, seconds, sender.getLocation());
+        sender.sendMessage("Inspect result count: " + results.size());
         return true;
     }
 
-    private void handleNominate(Player initiator, String target) {
-        int guards = guardManager.guardCount();
-        String emergencyOwner = plugin.getConfig().getString("emergency-owner", "").toLowerCase(Locale.ROOT);
-        boolean isEmergencyOwner = initiator.getName().equalsIgnoreCase(emergencyOwner);
-
-        VoteManager.VoteType voteType;
-        java.util.function.Predicate<Player> eligibility;
-
-        if (guards == 0) {
-            long daysOnline = playtimeDays(initiator);
-            if (!isEmergencyOwner && daysOnline < MIN_ONLINE_DAYS_FOR_OPEN_VOTE) {
-                initiator.sendMessage("[Guard] Guard=0. Нужен online >= " + MIN_ONLINE_DAYS_FOR_OPEN_VOTE + " дн. Сейчас: " + daysOnline + " дн.");
-                return;
-            }
-            voteType = VoteManager.VoteType.OPEN_GUARD_NOMINATE;
-            eligibility = p -> true;
-        } else {
-            if (!guardManager.isGuard(initiator.getName())) {
-                initiator.sendMessage("[Guard] Только действующий Guard может выдвигать кандидата.");
-                return;
-            }
-            voteType = VoteManager.VoteType.GUARD_NOMINATE;
-            eligibility = p -> guardManager.isGuard(p.getName());
+    private boolean handleRollback(Player sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage("Использование: /guard rollback <request|execute|status>");
+            return true;
         }
 
-        Optional<String> error = voteManager.startVote(voteType, target, "guard nomination", initiator, eligibility);
-        if (error.isPresent()) {
-            initiator.sendMessage(error.get());
-            return;
-        }
-
-        voteManager.activeSnapshot().ifPresent(snapshot ->
-                initiator.sendMessage("[Guard] Старт " + snapshot.type() + ": target=" + snapshot.target()
-                        + " | yes=0 no=0 | таймер=" + snapshot.secondsLeft() + "с"));
+        return switch (args[1].toLowerCase()) {
+            case "request" -> handleRollbackRequest(sender, args);
+            case "execute" -> handleRollbackExecute(sender);
+            case "status" -> handleRollbackStatus(sender);
+            default -> {
+                sessionManager.logRollbackBypassAttempt(sender.getName(), "unknown rollback action=" + args[1]);
+                sender.sendMessage("Неверный rollback action.");
+                yield true;
+            }
+        };
     }
 
-    private void handleImpeach(Player initiator, String target) {
-        if (guardManager.guardCount() == 0) {
-            initiator.sendMessage("[Guard] Нельзя объявить импичмент: состав Guard пуст.");
-            return;
-        }
-        if (!guardManager.isGuard(initiator.getName())) {
-            initiator.sendMessage("[Guard] Только действующий Guard может инициировать импичмент.");
-            return;
+    private boolean handleRollbackRequest(Player sender, String[] args) {
+        if (!guardManager.isGuard(sender.getName())) {
+            sender.sendMessage("Создавать rollback-сессии могут только Guard.");
+            return true;
         }
 
-        Optional<String> error = voteManager.startVote(
-                VoteManager.VoteType.GUARD_IMPEACH,
-                target,
-                "guard impeachment",
-                initiator,
-                p -> guardManager.isGuard(p.getName())
-        );
-
-        if (error.isPresent()) {
-            initiator.sendMessage(error.get());
-            return;
+        if (args.length != 5) {
+            sender.sendMessage("Использование: /guard rollback request <player> <radius> <hours>");
+            return true;
         }
 
-        voteManager.activeSnapshot().ifPresent(snapshot ->
-                initiator.sendMessage("[Guard] Старт impeach: target=" + snapshot.target()
-                        + " | yes=0 no=0 | таймер=" + snapshot.secondsLeft() + "с"));
+        String target = args[2];
+        Integer radius = parsePositiveInt(args[3]);
+        Integer hours = parsePositiveInt(args[4]);
+        if (radius == null || hours == null) {
+            sender.sendMessage("radius/hours должны быть положительными числами.");
+            return true;
+        }
+
+        int seconds = Math.toIntExact(Duration.of(hours, ChronoUnit.HOURS).toSeconds());
+        if (!sessionManager.validateRollbackLimits(radius, seconds)) {
+            sender.sendMessage("Лимиты rollback: radius <= 50, глубина <= 7 дней.");
+            return true;
+        }
+
+        SessionManager.RollbackSession session = sessionManager.startRollbackSession(sender.getName(), target, radius, seconds);
+        sender.sendMessage("Создана ROLLBACK-сессия id=" + session.getId() + ". Голосуйте /vote yes|no (порог 2/3 от active Guard).");
+        return true;
     }
 
-    private long playtimeDays(Player player) {
-        long ticks = player.getStatistic(Statistic.PLAY_ONE_MINUTE);
-        return ticks / 20L / 60L / 60L / 24L;
+    private boolean handleRollbackExecute(Player sender) {
+        SessionManager.RollbackSession session = sessionManager.getRollbackSession();
+        if (session == null) {
+            sessionManager.logRollbackBypassAttempt(sender.getName(), "rollback without session");
+            sender.sendMessage("Rollback запрещен: нет созданной/одобренной сессии.");
+            return true;
+        }
+        if (!session.isApproved()) {
+            sessionManager.logRollbackBypassAttempt(sender.getName(), "rollback without approval; sessionId=" + session.getId());
+            sender.sendMessage("Rollback запрещен: сессия не одобрена.");
+            return true;
+        }
+
+        boolean success = coreProtectService.rollback(sender, session.getTarget(), session.getRadius(), session.getTimeSeconds(), sender.getLocation());
+        sender.sendMessage(success ? "Rollback выполнен." : "Rollback не выполнен (см. лог).");
+        if (success) {
+            sessionManager.clearRollbackSession();
+        }
+        return true;
+    }
+
+    private boolean handleRollbackStatus(Player sender) {
+        SessionManager.RollbackSession session = sessionManager.getRollbackSession();
+        if (session == null) {
+            sender.sendMessage("Активной rollback-сессии нет.");
+            return true;
+        }
+
+        sender.sendMessage("ROLLBACK session id=" + session.getId() +
+            " initiator=" + session.getInitiator() +
+            " target=" + session.getTarget() +
+            " radius=" + session.getRadius() +
+            " seconds=" + session.getTimeSeconds() +
+            " approved=" + session.isApproved() +
+            " votes=" + session.getVoteCount() +
+            " created=" + session.getCreatedAt());
+        return true;
+    }
+
+    private Integer parsePositiveInt(String value) {
+        try {
+            int parsed = Integer.parseInt(value);
+            return parsed > 0 ? parsed : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (args.length == 1) {
-            return List.of("nominate", "impeach");
+            return List.of("inspect", "rollback");
         }
-        if (args.length == 2) {
-            return Bukkit.getOnlinePlayers().stream().map(Player::getName).collect(Collectors.toList());
+        if (args.length == 2 && "rollback".equalsIgnoreCase(args[0])) {
+            return List.of("request", "execute", "status");
         }
         return List.of();
     }

@@ -8,8 +8,8 @@ commands:
     description: Start vote-ban for a player.
     usage: /voteban <nick> <reason>
   vote:
-    description: Cast a vote in active session.
+    description: Cast a vote in active rollback session.
     usage: /vote <yes|no>
   guard:
-    description: Manage guard governance voting.
-    usage: /guard <nominate|impeach> <nick>
+    description: Guard governance commands including inspect/rollback.
+    usage: /guard inspect <player> <radius> <hours> | /guard rollback <request|execute|status>

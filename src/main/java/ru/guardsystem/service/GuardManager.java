@@ -1,6 +1,12 @@
 package ru.guardsystem.service;
 
+import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -14,7 +20,8 @@ public class GuardManager {
 
     private final PersistenceLayer persistenceLayer;
     private final AuditLogger auditLogger;
-    private final Set<String> guards = new LinkedHashSet<>();
+    private YamlConfiguration guardsConfiguration;
+    private List<String> guards = List.of();
 
     public GuardManager(PersistenceLayer persistenceLayer, AuditLogger auditLogger) {
         this.persistenceLayer = persistenceLayer;
@@ -22,18 +29,21 @@ public class GuardManager {
     }
 
     public void load() {
-        guards.clear();
-        YamlConfiguration guardsConfiguration = persistenceLayer.loadGuardsYaml();
-        guardsConfiguration.getStringList("guards").stream()
-                .map(this::normalize)
-                .forEach(guards::add);
-        auditLogger.log("GuardManager loaded guards.yml");
+        this.guardsConfiguration = persistenceLayer.loadGuardsYaml();
+        List<String> configuredGuards = guardsConfiguration.getStringList("guards");
+        this.guards = configuredGuards.stream()
+            .map(name -> name.toLowerCase(Locale.ROOT))
+            .distinct()
+            .toList();
+        auditLogger.log("GuardManager loaded guards.yml with guards=" + this.guards.size());
     }
 
     public void save() {
-        YamlConfiguration configuration = new YamlConfiguration();
-        configuration.set("guards", guards.stream().toList());
-        persistenceLayer.saveGuardsYaml(configuration);
+        if (guardsConfiguration == null) {
+            return;
+        }
+        guardsConfiguration.set("guards", new ArrayList<>(guards));
+        persistenceLayer.saveGuardsYaml(guardsConfiguration);
         auditLogger.log("GuardManager saved guards.yml");
     }
 
@@ -67,5 +77,23 @@ public class GuardManager {
 
     private String normalize(String nickname) {
         return nickname.toLowerCase(Locale.ROOT);
+    }
+
+    public int getActiveGuardCount() {
+        int active = 0;
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (isGuard(player.getName())) {
+                active++;
+            }
+        }
+        return active;
+    }
+
+    public boolean isGuard(String playerName) {
+        return guards.contains(playerName.toLowerCase(Locale.ROOT));
+    }
+
+    public int getConfiguredGuardCount() {
+        return guards.size();
     }
 }

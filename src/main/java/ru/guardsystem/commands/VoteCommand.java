@@ -6,8 +6,8 @@ import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import ru.guardsystem.service.GuardManager;
 import ru.guardsystem.service.SessionManager;
-import ru.guardsystem.service.VoteManager;
 
 import java.util.List;
 import java.util.Locale;
@@ -15,38 +15,46 @@ import java.util.Locale;
 public class VoteCommand implements TabExecutor {
 
     private static final List<String> OPTIONS = List.of("yes", "no");
-    private final VoteManager voteManager;
-    private final SessionManager sessionManager;
 
-    public VoteCommand(VoteManager voteManager, SessionManager sessionManager) {
-        this.voteManager = voteManager;
+    private final SessionManager sessionManager;
+    private final GuardManager guardManager;
+
+    public VoteCommand(SessionManager sessionManager, GuardManager guardManager) {
         this.sessionManager = sessionManager;
+        this.guardManager = guardManager;
     }
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
-        if (!(sender instanceof Player player)) {
-            sender.sendMessage("[Vote] Только игрок может голосовать.");
-            return true;
-        }
-        if (args.length != 1) {
-            sender.sendMessage("[Vote] Использование: /vote yes|no");
+        if (args.length != 1 || (!"yes".equalsIgnoreCase(args[0]) && !"no".equalsIgnoreCase(args[0]))) {
+            sender.sendMessage("Использование: /vote <yes|no>");
             return true;
         }
 
-        VoteManager.VoteChoice choice;
-        String normalized = args[0].toLowerCase(Locale.ROOT);
-        if ("yes".equals(normalized)) {
-            choice = VoteManager.VoteChoice.YES;
-        } else if ("no".equals(normalized)) {
-            choice = VoteManager.VoteChoice.NO;
-        } else {
-            sender.sendMessage("[Vote] Допустимые значения: yes | no");
+        if (!guardManager.isGuard(sender.getName())) {
+            sender.sendMessage("Голосовать могут только Guard.");
             return true;
         }
 
-        VoteManager.VoteResult result = voteManager.castVote(player, choice);
-        sender.sendMessage(result.message());
+        boolean voteYes = "yes".equalsIgnoreCase(args[0]);
+        SessionManager.VoteResult result = sessionManager.voteRollback(sender.getName(), voteYes, guardManager.getActiveGuardCount());
+
+        if (!result.hasSession()) {
+            sender.sendMessage("Нет активной ROLLBACK-сессии.");
+            return true;
+        }
+        if (result.alreadyApproved()) {
+            sender.sendMessage("Сессия уже одобрена. Выполните /guard rollback execute.");
+            return true;
+        }
+
+        sender.sendMessage("Голос принят. yes=" + result.yesVotes() + " no=" + result.noVotes() +
+            " required=" + result.requiredVotes() + " (activeGuards=" + result.activeGuards() + ")");
+
+        if (result.session().isApproved()) {
+            sender.sendMessage("ROLLBACK-сессия одобрена. Доступно: /guard rollback execute");
+        }
+
         return true;
     }
 
