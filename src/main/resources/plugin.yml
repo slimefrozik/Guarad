@@ -1,0 +1,15 @@
+name: GuardGovernance
+version: '1.0.0-SNAPSHOT'
+main: ru.guardsystem.GuardGovernancePlugin
+api-version: '1.21'
+author: GuardSystem
+commands:
+  voteban:
+    description: Start or inspect vote-ban process.
+    usage: /voteban
+  vote:
+    description: Cast a vote in active vote-ban session.
+    usage: /vote <yes|no>
+  guard:
+    description: Manage guard governance module.
+    usage: /guard
