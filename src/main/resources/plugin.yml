@@ -8,8 +8,8 @@ commands:
     description: Start or inspect vote-ban process.
     usage: /voteban
   vote:
-    description: Cast a vote in active vote-ban session.
+    description: Cast a vote in active rollback session.
     usage: /vote <yes|no>
   guard:
-    description: Manage guard governance module.
-    usage: /guard
+    description: Guard governance commands including inspect/rollback.
+    usage: /guard inspect <player> <radius> <hours> | /guard rollback <request|execute|status>

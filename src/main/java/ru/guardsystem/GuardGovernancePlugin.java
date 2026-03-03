@@ -6,6 +6,7 @@ import ru.guardsystem.commands.GuardCommand;
 import ru.guardsystem.commands.VoteBanCommand;
 import ru.guardsystem.commands.VoteCommand;
 import ru.guardsystem.service.AuditLogger;
+import ru.guardsystem.service.CoreProtectService;
 import ru.guardsystem.service.GuardManager;
 import ru.guardsystem.service.PersistenceLayer;
 import ru.guardsystem.service.SessionManager;
@@ -18,6 +19,7 @@ public final class GuardGovernancePlugin extends JavaPlugin {
     private GuardManager guardManager;
     private VoteManager voteManager;
     private SessionManager sessionManager;
+    private CoreProtectService coreProtectService;
 
     @Override
     public void onEnable() {
@@ -28,10 +30,12 @@ public final class GuardGovernancePlugin extends JavaPlugin {
         this.guardManager = new GuardManager(persistenceLayer, auditLogger);
         this.voteManager = new VoteManager(persistenceLayer, auditLogger);
         this.sessionManager = new SessionManager(auditLogger);
+        this.coreProtectService = new CoreProtectService(this, auditLogger);
 
         this.guardManager.load();
         this.voteManager.load();
         this.sessionManager.load();
+        this.coreProtectService.initialize();
 
         registerCommands();
         getLogger().info("GuardGovernance enabled.");
@@ -52,8 +56,8 @@ public final class GuardGovernancePlugin extends JavaPlugin {
 
     private void registerCommands() {
         VoteBanCommand voteBanCommand = new VoteBanCommand(voteManager, sessionManager);
-        VoteCommand voteCommand = new VoteCommand(voteManager);
-        GuardCommand guardCommand = new GuardCommand(guardManager);
+        VoteCommand voteCommand = new VoteCommand(sessionManager, guardManager);
+        GuardCommand guardCommand = new GuardCommand(guardManager, sessionManager, coreProtectService);
 
         bindCommand("voteban", voteBanCommand);
         bindCommand("vote", voteCommand);
