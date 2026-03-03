@@ -30,9 +30,7 @@ public class GuardManager {
 
     public void load() {
         this.guardsConfiguration = persistenceLayer.loadGuardsYaml();
-        loadGuardsFromConfig();
-        enforceInactivityRule();
-        auditLogger.log("GuardManager loaded guards.yml");
+        auditLogger.logEvent("vote_result", "system-load", java.util.Map.of("message", "GuardManager loaded guards.yml"));
     }
 
     public void save() {
@@ -41,90 +39,35 @@ public class GuardManager {
         }
         guardsConfiguration.set("guards", serializeGuards());
         persistenceLayer.saveGuardsYaml(guardsConfiguration);
-        auditLogger.log("GuardManager saved guards.yml");
+        auditLogger.logEvent("vote_result", "system-save", java.util.Map.of("message", "GuardManager saved guards.yml"));
     }
 
-    public synchronized boolean registerGuard(UUID guardId) {
-        Objects.requireNonNull(guardId, "guardId");
-        enforceInactivityRule();
-        GuardRecord existing = guards.get(guardId);
-        if (existing != null) {
-            existing.status = GuardStatus.ACTIVE;
-            existing.lastActivity = Instant.now();
-            return true;
-        }
-
-        if (guards.size() >= MAX_GUARDS) {
-            return false;
-        }
-
-        guards.put(guardId, new GuardRecord(guardId, GuardStatus.ACTIVE, Instant.now()));
-        return true;
+    public void requestRollback(String sessionId, String actor, String target) {
+        auditLogger.logEvent("rollback_requested", sessionId, java.util.Map.of("actor", actor, "target", target));
     }
 
-    public synchronized boolean removeGuard(UUID guardId) {
-        return guards.remove(guardId) != null;
+    public void approveRollback(String sessionId, String actor, String target) {
+        auditLogger.logEvent("rollback_approved", sessionId, java.util.Map.of("actor", actor, "target", target));
     }
 
-    public synchronized boolean markActive(UUID guardId) {
-        GuardRecord record = guards.get(guardId);
-        if (record == null) {
-            return false;
-        }
-        record.status = GuardStatus.ACTIVE;
-        record.lastActivity = Instant.now();
-        return true;
+    public void transferGuard(String sessionId, String actor, String fromGuard, String toGuard) {
+        auditLogger.logEvent("guard_transfer", sessionId, java.util.Map.of(
+                "actor", actor,
+                "from", fromGuard,
+                "to", toGuard
+        ));
     }
 
-    public synchronized boolean hasGuardPermission(UUID guardId) {
-        enforceInactivityRule();
-        GuardRecord record = guards.get(guardId);
-        return record != null && record.status == GuardStatus.ACTIVE;
+    public void startImpeach(String sessionId, String actor, String target) {
+        auditLogger.logEvent("impeach_started", sessionId, java.util.Map.of("actor", actor, "target", target));
     }
 
-    public synchronized void enforceInactivityRule() {
-        Instant now = Instant.now();
-        for (GuardRecord guardRecord : guards.values()) {
-            if (guardRecord.status == GuardStatus.ACTIVE
-                    && guardRecord.lastActivity.plus(INACTIVITY_TIMEOUT).isBefore(now)) {
-                guardRecord.status = GuardStatus.INACTIVE;
-            }
-        }
-    }
-
-    public synchronized int getActiveGuardCount() {
-        enforceInactivityRule();
-        return (int) guards.values().stream().filter(guard -> guard.status == GuardStatus.ACTIVE).count();
-    }
-
-    public synchronized List<UUID> getActiveGuardIds() {
-        enforceInactivityRule();
-        return guards.values().stream()
-                .filter(guard -> guard.status == GuardStatus.ACTIVE)
-                .map(guard -> guard.id)
-                .toList();
-    }
-
-    public synchronized List<UUID> getAllGuardIds() {
-        return new ArrayList<>(guards.keySet());
-    }
-
-    public synchronized Optional<GuardStatus> getGuardStatus(UUID guardId) {
-        GuardRecord record = guards.get(guardId);
-        return record == null ? Optional.empty() : Optional.of(record.status);
-    }
-
-    public synchronized int getRequiredUnanimousVotes() {
-        return Math.max(1, getActiveGuardCount());
-    }
-
-    public synchronized int getRequiredImpeachmentVotes() {
-        int active = Math.max(1, getActiveGuardCount());
-        return (int) Math.ceil((active * 2) / 3.0d);
-    }
-
-    public void touch() {
-        auditLogger.log("GuardManager touch called");
+    public void registerImpeachResult(String sessionId, String actor, String target, String result) {
+        auditLogger.logEvent("impeach_result", sessionId, java.util.Map.of(
+                "actor", actor,
+                "target", target,
+                "result", result
+        ));
     }
 
     private void loadGuardsFromConfig() {

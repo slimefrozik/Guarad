@@ -32,116 +32,31 @@ public class VoteManager {
 
     public void load() {
         this.votesJson = persistenceLayer.loadVotesJson();
-        auditLogger.log("VoteManager loaded votes.json");
+        auditLogger.logEvent("vote_result", "system-load", java.util.Map.of("message", "VoteManager loaded votes.json"));
     }
 
     public void save() {
         this.votesJson = buildDebugStateJson();
         persistenceLayer.saveVotesJson(votesJson);
-        auditLogger.log("VoteManager saved votes.json");
+        auditLogger.logEvent("vote_result", "system-save", java.util.Map.of("message", "VoteManager saved votes.json"));
     }
 
-    public synchronized VoteCreateResult createSession(VoteType voteType, UUID initiator, UUID target) {
-        Objects.requireNonNull(voteType, "voteType");
-        Objects.requireNonNull(initiator, "initiator");
-        Objects.requireNonNull(target, "target");
-
-        guardManager.enforceInactivityRule();
-        if (!guardManager.hasGuardPermission(initiator)) {
-            return VoteCreateResult.rejected("Initiator does not have active Guard rights.");
-        }
-
-        if (voteType == VoteType.BAN) {
-            Instant cooldownUntil = banCooldownUntil.get(target);
-            if (cooldownUntil != null && cooldownUntil.isAfter(Instant.now())) {
-                return VoteCreateResult.rejected("Ban vote cooldown for target is still active.");
-            }
-        }
-
-        if (voteType == VoteType.NOMINATION) {
-            if (initiator.equals(target)) {
-                return VoteCreateResult.rejected("Self-nomination is not allowed.");
-            }
-            if (guardManager.getAllGuardIds().contains(target)) {
-                return VoteCreateResult.rejected("Cannot nominate a current Guard.");
-            }
-        }
-
-        VoteSession session = new VoteSession(UUID.randomUUID(), voteType, initiator, target, Instant.now(), SessionStatus.OPEN);
-        sessions.put(session.id(), session);
-
-        if (voteType == VoteType.BAN) {
-            banCooldownUntil.put(target, Instant.now().plus(BAN_COOLDOWN));
-        }
-
-        return VoteCreateResult.created(session);
+    public void startVoteBan(String sessionId, String initiator, String target) {
+        auditLogger.logEvent("voteban_initiated", sessionId, java.util.Map.of(
+                "initiator", initiator,
+                "target", target
+        ));
     }
 
-    public synchronized VoteDecisionResult castVote(UUID sessionId, UUID voter, VoteDecision decision) {
-        Objects.requireNonNull(sessionId, "sessionId");
-        Objects.requireNonNull(voter, "voter");
-        Objects.requireNonNull(decision, "decision");
-
-        guardManager.enforceInactivityRule();
-        VoteSession session = sessions.get(sessionId);
-        if (session == null) {
-            return VoteDecisionResult.rejected("Vote session not found.");
-        }
-        if (session.status() != SessionStatus.OPEN && session.status() != SessionStatus.AWAITING_CONFIRMATION) {
-            return VoteDecisionResult.rejected("Vote session is not active.");
-        }
-        if (!guardManager.hasGuardPermission(voter)) {
-            return VoteDecisionResult.rejected("Only active Guards can vote.");
-        }
-        if (session.status() == SessionStatus.AWAITING_CONFIRMATION) {
-            return VoteDecisionResult.rejected("Nomination is awaiting confirmation, voting closed.");
-        }
-
-        enforceTimeoutRules(session);
-        if (session.status() != SessionStatus.OPEN) {
-            return VoteDecisionResult.rejected("Vote session is not open.");
-        }
-
-        session.votes().put(voter, decision);
-        resolveSession(session);
-
-        return VoteDecisionResult.accepted(session.status());
+    public void castVote(String sessionId, String voter, String choice) {
+        auditLogger.logEvent("vote_cast", sessionId, java.util.Map.of(
+                "voter", voter,
+                "choice", choice
+        ));
     }
 
-    public synchronized boolean confirmNomination(UUID sessionId, UUID nominee) {
-        VoteSession session = sessions.get(sessionId);
-        if (session == null || session.type() != VoteType.NOMINATION || session.status() != SessionStatus.AWAITING_CONFIRMATION) {
-            return false;
-        }
-        if (!session.target().equals(nominee)) {
-            return false;
-        }
-        if (session.confirmationDeadline() != null && Instant.now().isAfter(session.confirmationDeadline())) {
-            session.setStatus(SessionStatus.EXPIRED);
-            return false;
-        }
-
-        boolean added = guardManager.registerGuard(nominee);
-        session.setStatus(added ? SessionStatus.APPROVED : SessionStatus.REJECTED);
-        return added;
-    }
-
-    public synchronized Optional<VoteSession> findSession(UUID sessionId) {
-        return Optional.ofNullable(sessions.get(sessionId));
-    }
-
-    public synchronized List<VoteSession> getSessions() {
-        return new ArrayList<>(sessions.values());
-    }
-
-    public synchronized void sweepExpiredSessions() {
-        for (VoteSession session : sessions.values()) {
-            enforceTimeoutRules(session);
-        }
-    }
-
-    public void touch() {
-        auditLogger.log("VoteManager touch called");
+    public void registerVoteResult(String sessionId, String result) {
+        auditLogger.logEvent("vote_result", sessionId, java.util.Map.of("result", result));
     }
 
     private void enforceTimeoutRules(VoteSession session) {
