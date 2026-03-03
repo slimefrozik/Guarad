@@ -46,7 +46,7 @@ public class GuardCommand implements TabExecutor {
         }
 
         if (args.length == 0) {
-            sender.sendMessage("Использование: /guard gui | /guard admin <add|remove> <player> | /guard transfer <player> | /guard rollback <request|execute|status>");
+            sender.sendMessage("Использование: /guard gui | /guard admin <add|remove> <игрок> | /guard transfer <игрок> | /guard rollback <request|execute|status>");
             return true;
         }
 
@@ -80,7 +80,7 @@ public class GuardCommand implements TabExecutor {
         }
 
         if (args.length != 3) {
-            sender.sendMessage("Использование: /guard admin <add|remove> <player>");
+            sender.sendMessage("Использование: /guard admin <add|remove> <игрок>");
             return true;
         }
 
@@ -95,7 +95,7 @@ public class GuardCommand implements TabExecutor {
             changed = guardManager.removeGuard(target);
             sender.sendMessage(changed ? "Игрок " + target + " удалён из Guard." : "Игрок не состоит в Guard.");
         } else {
-            sender.sendMessage("Использование: /guard admin <add|remove> <player>");
+            sender.sendMessage("Использование: /guard admin <add|remove> <игрок>");
             return true;
         }
 
@@ -114,7 +114,7 @@ public class GuardCommand implements TabExecutor {
         }
 
         if (args.length != 2) {
-            sender.sendMessage("Использование: /guard transfer <player>");
+            sender.sendMessage("Использование: /guard transfer <игрок>");
             return true;
         }
 
@@ -156,7 +156,7 @@ public class GuardCommand implements TabExecutor {
             case "status" -> handleRollbackStatus(sender);
             default -> {
                 sessionManager.logRollbackBypassAttempt(sender.getName(), "unknown rollback action=" + args[1]);
-                sender.sendMessage("Неверный rollback action.");
+                sender.sendMessage("Неверное действие rollback.");
                 yield true;
             }
         };
@@ -169,7 +169,7 @@ public class GuardCommand implements TabExecutor {
         }
 
         if (args.length != 5) {
-            sender.sendMessage("Использование: /guard rollback request <player> <radius> <hours>");
+            sender.sendMessage("Использование: /guard rollback request <игрок> <radius> <hours>");
             return true;
         }
 
@@ -188,7 +188,7 @@ public class GuardCommand implements TabExecutor {
         }
 
         SessionManager.RollbackSession session = sessionManager.startRollbackSession(sender.getName(), target, radius, seconds);
-        sender.sendMessage("Создана ROLLBACK-сессия id=" + session.getId() + ". Голосуйте /vote yes|no (порог 2/3 от active Guard).");
+        sender.sendMessage("Создана ROLLBACK-сессия id=" + session.getId() + ". Голосуйте /vote yes|no (порог 2/3 от активных Guard).");
         return true;
     }
 
@@ -196,12 +196,12 @@ public class GuardCommand implements TabExecutor {
         SessionManager.RollbackSession session = sessionManager.getRollbackSession();
         if (session == null) {
             sessionManager.logRollbackBypassAttempt(sender.getName(), "rollback without session");
-            sender.sendMessage("Rollback запрещен: нет созданной/одобренной сессии.");
+            sender.sendMessage("Rollback запрещён: нет созданной/одобренной сессии.");
             return true;
         }
         if (!session.isApproved()) {
             sessionManager.logRollbackBypassAttempt(sender.getName(), "rollback without approval; sessionId=" + session.getId());
-            sender.sendMessage("Rollback запрещен: сессия не одобрена.");
+            sender.sendMessage("Rollback запрещён: сессия не одобрена.");
             return true;
         }
 
@@ -220,14 +220,14 @@ public class GuardCommand implements TabExecutor {
             return true;
         }
 
-        sender.sendMessage("ROLLBACK session id=" + session.getId() +
-            " initiator=" + session.getInitiator() +
-            " target=" + session.getTarget() +
-            " radius=" + session.getRadius() +
-            " seconds=" + session.getTimeSeconds() +
-            " approved=" + session.isApproved() +
-            " votes=" + session.getVoteCount() +
-            " created=" + session.getCreatedAt());
+        sender.sendMessage("ROLLBACK сессия id=" + session.getId() +
+            " инициатор=" + session.getInitiator() +
+            " цель=" + session.getTarget() +
+            " радиус=" + session.getRadius() +
+            " секунд=" + session.getTimeSeconds() +
+            " одобрено=" + session.isApproved() +
+            " голосов=" + session.getVoteCount() +
+            " создано=" + session.getCreatedAt());
         return true;
     }
 

@@ -5,11 +5,11 @@ api-version: '1.21'
 author: GuardSystem
 commands:
   voteban:
-    description: Start vote-ban for a player.
-    usage: /voteban <nick> <reason>
+    description: Запуск голосования за бан игрока.
+    usage: /voteban <ник> <причина>
   vote:
-    description: Cast a vote in active rollback session.
+    description: Голос в активной rollback-сессии.
     usage: /vote <yes|no>
   guard:
-    description: Guard governance commands including GUI, transfer and rollback.
-    usage: /guard gui | /guard admin <add|remove> <player> | /guard transfer <player> | /guard rollback <request|execute|status>
+    description: Команды управления Guard, GUI, transfer и rollback.
+    usage: /guard gui | /guard admin <add|remove> <игрок> | /guard transfer <игрок> | /guard rollback <request|execute|status>

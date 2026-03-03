@@ -8,6 +8,7 @@ import ru.guardsystem.commands.VoteCommand;
 import ru.guardsystem.listener.GuardGuiListener;
 import ru.guardsystem.listener.GuardPermissionListener;
 import ru.guardsystem.service.AuditLogger;
+import ru.guardsystem.service.BanInventoryService;
 import ru.guardsystem.service.CoreProtectService;
 import ru.guardsystem.service.GuardGuiService;
 import ru.guardsystem.service.GuardManager;
@@ -26,6 +27,7 @@ public final class GuardGovernancePlugin extends JavaPlugin {
     private CoreProtectService coreProtectService;
     private GuardGuiService guardGuiService;
     private GuardPermissionService guardPermissionService;
+    private BanInventoryService banInventoryService;
 
     @Override
     public void onEnable() {
@@ -36,16 +38,18 @@ public final class GuardGovernancePlugin extends JavaPlugin {
 
         this.auditLogger = new AuditLogger(getDataFolder().toPath().resolve("logs"));
         this.guardManager = new GuardManager(persistenceLayer, auditLogger);
-        this.voteManager = new VoteManager(this, persistenceLayer, auditLogger, guardManager);
+        this.banInventoryService = new BanInventoryService();
+        this.voteManager = new VoteManager(this, persistenceLayer, auditLogger, guardManager, banInventoryService);
         this.sessionManager = new SessionManager(auditLogger);
         this.coreProtectService = new CoreProtectService(this, auditLogger);
-        this.guardGuiService = new GuardGuiService(guardManager);
+        this.guardGuiService = new GuardGuiService(guardManager, voteManager, banInventoryService);
         this.guardPermissionService = new GuardPermissionService(this, guardManager);
 
         this.guardManager.load();
         this.voteManager.load();
         this.sessionManager.load();
         this.coreProtectService.initialize();
+        this.banInventoryService.cacheOnlinePlayers();
 
         registerCommands();
         registerListeners();
@@ -80,8 +84,9 @@ public final class GuardGovernancePlugin extends JavaPlugin {
     }
 
     private void registerListeners() {
-        getServer().getPluginManager().registerEvents(new GuardGuiListener(guardManager, guardGuiService, guardPermissionService), this);
+        getServer().getPluginManager().registerEvents(new GuardGuiListener(guardManager, guardGuiService, guardPermissionService, voteManager, banInventoryService), this);
         getServer().getPluginManager().registerEvents(new GuardPermissionListener(guardPermissionService), this);
+        getServer().getPluginManager().registerEvents(banInventoryService, this);
     }
 
     private void bindCommand(String name, org.bukkit.command.TabExecutor executor) {

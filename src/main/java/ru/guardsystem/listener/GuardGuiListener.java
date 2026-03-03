@@ -7,10 +7,14 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import ru.guardsystem.service.BanInventoryService;
 import ru.guardsystem.service.GuardGuiService;
 import ru.guardsystem.service.GuardManager;
 import ru.guardsystem.service.GuardPermissionService;
+import ru.guardsystem.service.VoteManager;
 
+import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class GuardGuiListener implements Listener {
@@ -18,11 +22,19 @@ public class GuardGuiListener implements Listener {
     private final GuardManager guardManager;
     private final GuardGuiService guardGuiService;
     private final GuardPermissionService guardPermissionService;
+    private final VoteManager voteManager;
+    private final BanInventoryService banInventoryService;
 
-    public GuardGuiListener(GuardManager guardManager, GuardGuiService guardGuiService, GuardPermissionService guardPermissionService) {
+    public GuardGuiListener(GuardManager guardManager,
+                            GuardGuiService guardGuiService,
+                            GuardPermissionService guardPermissionService,
+                            VoteManager voteManager,
+                            BanInventoryService banInventoryService) {
         this.guardManager = guardManager;
         this.guardGuiService = guardGuiService;
         this.guardPermissionService = guardPermissionService;
+        this.voteManager = voteManager;
+        this.banInventoryService = banInventoryService;
     }
 
     @EventHandler
@@ -32,7 +44,22 @@ public class GuardGuiListener implements Listener {
         }
 
         String title = event.getView().getTitle();
-        if (!"Guard меню".equals(title) && !"Передача Guard".equals(title)) {
+        boolean confiscatedView = title.startsWith("§0Конфискат: ");
+        boolean managedTitle = GuardGuiService.MAIN_TITLE.equals(title)
+                || GuardGuiService.TRANSFER_TITLE.equals(title)
+                || GuardGuiService.VOTEBAN_TITLE.equals(title)
+                || GuardGuiService.LOOT_LIST_TITLE.equals(title)
+                || confiscatedView;
+
+        if (!managedTitle) {
+            return;
+        }
+
+        if (confiscatedView) {
+            if (!player.isOp()) {
+                event.setCancelled(true);
+                player.sendMessage("Доступно только OP-админам.");
+            }
             return;
         }
 
@@ -47,34 +74,69 @@ public class GuardGuiListener implements Listener {
             return;
         }
 
-        String displayName = meta.getDisplayName().replace("§a", "").replace("§b", "").replace("§c", "").replace("§e", "");
+        String displayName = stripColor(meta.getDisplayName());
 
-        if ("Guard меню".equals(title)) {
-            if (displayName.equals("Состав Guard")) {
+        if (GuardGuiService.MAIN_TITLE.equals(title)) {
+            handleMainMenu(player, displayName);
+            return;
+        }
+
+        if (GuardGuiService.TRANSFER_TITLE.equals(title)) {
+            handleTransferMenu(player, displayName);
+            return;
+        }
+
+        if (GuardGuiService.VOTEBAN_TITLE.equals(title)) {
+            handleVoteBanMenu(player, displayName);
+            return;
+        }
+
+        if (GuardGuiService.LOOT_LIST_TITLE.equals(title)) {
+            handleLootListMenu(player, displayName);
+        }
+    }
+
+    private void handleMainMenu(Player player, String displayName) {
+        switch (displayName) {
+            case "Состав Guard" -> {
                 String guards = guardManager.listGuards().stream().sorted().collect(Collectors.joining(", "));
                 player.sendMessage(guards.isEmpty() ? "Список Guard пуст." : "Guard: " + guards);
-                return;
             }
-            if (displayName.equals("Передать роль Guard")) {
+            case "Передать роль Guard" -> {
                 if (!guardManager.isGuard(player.getName())) {
                     player.sendMessage("Только Guard может передавать роль.");
                     return;
                 }
                 guardGuiService.openTransferMenu(player);
-                return;
             }
-            if (displayName.equals("Закрыть")) {
-                player.closeInventory();
+            case "Начать VoteBan" -> {
+                if (!guardManager.isGuard(player.getName()) && !player.isOp()) {
+                    player.sendMessage("Только Guard или OP может начать VoteBan.");
+                    return;
+                }
+                guardGuiService.openVoteBanMenu(player);
             }
-            return;
+            case "Голосовать ЗА" -> handleVoteClick(player, VoteManager.VoteChoice.YES),
+                 "Голосовать ПРОТИВ" -> handleVoteClick(player, VoteManager.VoteChoice.NO);
+            case "Конфискат офлайн-банов" -> {
+                if (!player.isOp()) {
+                    player.sendMessage("Доступно только OP-админам.");
+                    return;
+                }
+                guardGuiService.openLootListMenu(player);
+            }
+            case "Закрыть" -> player.closeInventory();
+            default -> {
+            }
         }
+    }
 
+    private void handleTransferMenu(Player player, String target) {
         if (!guardManager.isGuard(player.getName())) {
             player.sendMessage("Только Guard может передавать роль.");
             return;
         }
 
-        String target = displayName;
         if (guardManager.isGuard(target)) {
             player.sendMessage("Игрок уже состоит в Guard.");
             return;
@@ -94,5 +156,57 @@ public class GuardGuiListener implements Listener {
         }
         player.sendMessage("Роль Guard передана игроку " + target + ".");
         player.closeInventory();
+    }
+
+    private void handleVoteBanMenu(Player player, String target) {
+        Optional<String> error = voteManager.startVote(
+                VoteManager.VoteType.VOTEBAN,
+                target,
+                "Инициировано через GUI",
+                player,
+                onlinePlayer -> true
+        );
+
+        if (error.isPresent()) {
+            player.sendMessage(error.get());
+            return;
+        }
+
+        voteManager.activeSnapshot().ifPresent(snapshot ->
+                Bukkit.broadcastMessage("[VoteBan] Запуск: цель=" + snapshot.target() + " | причина=" + snapshot.reason()
+                        + " | за=0 против=0 | таймер=" + snapshot.secondsLeft() + "с"));
+
+        guardGuiService.openMainMenu(player);
+    }
+
+    private void handleVoteClick(Player player, VoteManager.VoteChoice choice) {
+        VoteManager.VoteResult result = voteManager.castVote(player, choice);
+        player.sendMessage(result.message());
+        guardGuiService.openMainMenu(player);
+    }
+
+    private void handleLootListMenu(Player player, String targetName) {
+        if (!player.isOp()) {
+            player.sendMessage("Доступно только OP-админам.");
+            return;
+        }
+
+        UUID targetId = Bukkit.getOfflinePlayer(targetName).getUniqueId();
+        if (targetId == null) {
+            player.sendMessage("Не удалось открыть конфискат.");
+            return;
+        }
+
+        Optional<BanInventoryService.ConfiscatedInventory> inventory = banInventoryService.getConfiscatedInventory(targetId);
+        if (inventory.isEmpty()) {
+            player.sendMessage("Конфискат для игрока не найден.");
+            return;
+        }
+
+        player.openInventory(banInventoryService.buildConfiscatedInventoryView(inventory.get()));
+    }
+
+    private String stripColor(String value) {
+        return value.replaceAll("§.", "");
     }
 }
