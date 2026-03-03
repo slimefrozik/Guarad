@@ -11,5 +11,5 @@ commands:
     description: Cast a vote in active rollback session.
     usage: /vote <yes|no>
   guard:
-    description: Guard governance commands including inspect/rollback.
-    usage: /guard inspect <player> <radius> <hours> | /guard rollback <request|execute|status>
+    description: Guard governance commands including GUI, transfer and rollback.
+    usage: /guard gui | /guard admin <add|remove> <player> | /guard transfer <player> | /guard rollback <request|execute|status>
