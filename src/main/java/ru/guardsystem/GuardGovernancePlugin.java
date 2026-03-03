@@ -57,7 +57,7 @@ public final class GuardGovernancePlugin extends JavaPlugin {
     }
 
     private void registerCommands() {
-        VoteBanCommand voteBanCommand = new VoteBanCommand(voteManager, sessionManager);
+        VoteBanCommand voteBanCommand = new VoteBanCommand(voteManager);
         VoteCommand voteCommand = new VoteCommand(sessionManager, guardManager);
         GuardCommand guardCommand = new GuardCommand(guardManager, sessionManager, coreProtectService);
 
