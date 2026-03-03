@@ -61,7 +61,7 @@ public class BanInventoryService implements Listener {
         }
 
         List<ItemStack> cached = cachedInventories.getOrDefault(offlinePlayer.getUniqueId(), List.of());
-        confiscatedInventories.put(offlinePlayer.getUniqueId(), new ConfiscatedInventory(playerName, reason, copyItems(cached)));
+        confiscatedInventories.put(offlinePlayer.getUniqueId(), new ConfiscatedInventory(playerName, reason, copyItems(cached), false, null));
         return true;
     }
 
@@ -75,15 +75,43 @@ public class BanInventoryService implements Listener {
         return Optional.ofNullable(confiscatedInventories.get(playerId));
     }
 
+    public Optional<UUID> getConfiscatedPlayerIdByName(String playerName) {
+        return confiscatedInventories.entrySet().stream()
+                .filter(entry -> entry.getValue().playerName().equalsIgnoreCase(playerName))
+                .map(Map.Entry::getKey)
+                .findFirst();
+    }
+
+    public boolean markLootReturned(UUID playerId, String adminName) {
+        ConfiscatedInventory existing = confiscatedInventories.get(playerId);
+        if (existing == null || existing.returnedToWorld()) {
+            return false;
+        }
+
+        confiscatedInventories.put(playerId,
+                new ConfiscatedInventory(existing.playerName(), existing.reason(), existing.items(), true, adminName));
+        return true;
+    }
+
     public Inventory buildConfiscatedInventoryView(ConfiscatedInventory confiscatedInventory) {
         Inventory inventory = Bukkit.createInventory(null, 54, "§0Конфискат: " + confiscatedInventory.playerName());
         int slot = 0;
         for (ItemStack stack : confiscatedInventory.items()) {
-            if (slot >= inventory.getSize()) {
+            if (slot >= inventory.getSize() - 1) {
                 break;
             }
             inventory.setItem(slot, stack);
             slot++;
+        }
+
+        if (confiscatedInventory.returnedToWorld()) {
+            inventory.setItem(53, GuiItems.menuItem(Material.LIME_DYE, "§a✔ Вещи возвращены в мир",
+                    "§7Отметил: §f" + (confiscatedInventory.returnedBy() == null ? "неизвестно" : confiscatedInventory.returnedBy()),
+                    "§7Повторная выдача заблокирована"));
+        } else {
+            inventory.setItem(53, GuiItems.menuItem(Material.GRAY_DYE, "§7Отметить как возвращённые",
+                    "§7Нажмите после фактического возврата",
+                    "§7Чтобы исключить дюп вещей"));
         }
         return inventory;
     }
@@ -117,6 +145,24 @@ public class BanInventoryService implements Listener {
         return copy;
     }
 
-    public record ConfiscatedInventory(String playerName, String reason, List<ItemStack> items) {
+    public record ConfiscatedInventory(String playerName,
+                                      String reason,
+                                      List<ItemStack> items,
+                                      boolean returnedToWorld,
+                                      String returnedBy) {
+    }
+
+    private static final class GuiItems {
+        private static ItemStack menuItem(Material material, String displayName, String... loreLines) {
+            ItemStack item = new ItemStack(material);
+            var meta = item.getItemMeta();
+            if (meta == null) {
+                return item;
+            }
+            meta.setDisplayName(displayName);
+            meta.setLore(List.of(loreLines));
+            item.setItemMeta(meta);
+            return item;
+        }
     }
 }

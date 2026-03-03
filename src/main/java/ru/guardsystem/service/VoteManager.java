@@ -102,6 +102,7 @@ public class VoteManager {
         activeVote.ballots.put(voter.getUniqueId(), choice);
         VoteSnapshot snapshot = snapshot();
         return VoteResult.ok("[Голосование] Принято: " + (choice == VoteChoice.YES ? "за" : "против")
+                + " | цель=" + snapshot.target + " | причина=" + snapshot.reason
                 + " | за=" + snapshot.yes + " против=" + snapshot.no + " всего=" + snapshot.total
                 + " | осталось " + snapshot.secondsLeft + "с");
     }
@@ -142,11 +143,11 @@ public class VoteManager {
         if (accepted && snapshot != null) {
             applyOutcome(snapshot);
             Bukkit.broadcastMessage("[Голосование] Принято: " + label(snapshot.type) + " " + snapshot.target
-                    + " | за=" + snapshot.yes + " против=" + snapshot.no);
+                    + " | причина=" + snapshot.reason + " | за=" + snapshot.yes + " против=" + snapshot.no);
             auditLogger.log("Голосование принято: " + snapshot.type + " цель=" + snapshot.target);
         } else if (snapshot != null) {
             Bukkit.broadcastMessage("[Голосование] Отклонено: " + label(snapshot.type) + " " + snapshot.target
-                    + " | за=" + snapshot.yes + " против=" + snapshot.no);
+                    + " | причина=" + snapshot.reason + " | за=" + snapshot.yes + " против=" + snapshot.no);
             auditLogger.log("Голосование отклонено: " + snapshot.type + " цель=" + snapshot.target);
         }
 

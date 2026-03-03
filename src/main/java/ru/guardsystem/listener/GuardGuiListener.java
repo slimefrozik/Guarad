@@ -59,6 +59,39 @@ public class GuardGuiListener implements Listener {
             if (!player.isOp()) {
                 event.setCancelled(true);
                 player.sendMessage("Доступно только OP-админам.");
+                return;
+            }
+
+            String playerName = title.substring("§0Конфискат: ".length());
+            Optional<UUID> targetId = banInventoryService.getConfiscatedPlayerIdByName(playerName);
+            if (targetId.isEmpty()) {
+                event.setCancelled(true);
+                player.sendMessage("Не удалось определить игрока конфиската.");
+                return;
+            }
+
+            Optional<BanInventoryService.ConfiscatedInventory> confiscated = banInventoryService.getConfiscatedInventory(targetId.get());
+            if (confiscated.isEmpty()) {
+                event.setCancelled(true);
+                player.sendMessage("Конфискат не найден.");
+                return;
+            }
+
+            if (event.getRawSlot() == 53) {
+                event.setCancelled(true);
+                if (banInventoryService.markLootReturned(targetId.get(), player.getName())) {
+                    player.sendMessage("Конфискат отмечен как возвращённый в мир.");
+                    banInventoryService.getConfiscatedInventory(targetId.get())
+                            .ifPresent(updated -> player.openInventory(banInventoryService.buildConfiscatedInventoryView(updated)));
+                } else {
+                    player.sendMessage("Этот конфискат уже отмечен как возвращённый.");
+                }
+                return;
+            }
+
+            if (confiscated.get().returnedToWorld()) {
+                event.setCancelled(true);
+                player.sendMessage("Вещи уже отмечены как возвращённые в мир. Выдача заблокирована.");
             }
             return;
         }
@@ -116,8 +149,8 @@ public class GuardGuiListener implements Listener {
                 }
                 guardGuiService.openVoteBanMenu(player);
             }
-            case "Голосовать ЗА" -> handleVoteClick(player, VoteManager.VoteChoice.YES),
-                 "Голосовать ПРОТИВ" -> handleVoteClick(player, VoteManager.VoteChoice.NO);
+            case "Голосовать ЗА" -> handleVoteClick(player, VoteManager.VoteChoice.YES);
+            case "Голосовать ПРОТИВ" -> handleVoteClick(player, VoteManager.VoteChoice.NO);
             case "Конфискат офлайн-банов" -> {
                 if (!player.isOp()) {
                     player.sendMessage("Доступно только OP-админам.");
@@ -162,7 +195,7 @@ public class GuardGuiListener implements Listener {
         Optional<String> error = voteManager.startVote(
                 VoteManager.VoteType.VOTEBAN,
                 target,
-                "Инициировано через GUI",
+                "Через GUI (инициатор: " + player.getName() + ")",
                 player,
                 onlinePlayer -> true
         );
