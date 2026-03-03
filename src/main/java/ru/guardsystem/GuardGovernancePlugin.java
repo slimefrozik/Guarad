@@ -26,7 +26,7 @@ public final class GuardGovernancePlugin extends JavaPlugin {
 
         this.auditLogger = new AuditLogger(getDataFolder().toPath().resolve("logs"));
         this.guardManager = new GuardManager(persistenceLayer, auditLogger);
-        this.voteManager = new VoteManager(persistenceLayer, auditLogger);
+        this.voteManager = new VoteManager(persistenceLayer, auditLogger, guardManager);
         this.sessionManager = new SessionManager(auditLogger);
 
         this.guardManager.load();
