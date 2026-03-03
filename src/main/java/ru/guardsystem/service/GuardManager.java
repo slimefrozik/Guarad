@@ -67,6 +67,20 @@ public class GuardManager {
         return changed;
     }
 
+
+    public boolean transferGuardRole(String fromNickname, String toNickname) {
+        String from = normalize(fromNickname);
+        String to = normalize(toNickname);
+        if (from.equals(to) || !guards.contains(from) || guards.contains(to)) {
+            return false;
+        }
+
+        guards.remove(from);
+        guards.add(to);
+        auditLogger.log("Guard role transferred: " + fromNickname + " -> " + toNickname);
+        return true;
+    }
+
     public Collection<String> listGuards() {
         return Set.copyOf(guards);
     }

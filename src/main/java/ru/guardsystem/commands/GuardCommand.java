@@ -1,5 +1,6 @@
 package ru.guardsystem.commands;
 
+import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
@@ -7,11 +8,14 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import ru.guardsystem.service.CoreProtectService;
+import ru.guardsystem.service.GuardGuiService;
 import ru.guardsystem.service.GuardManager;
+import ru.guardsystem.service.GuardPermissionService;
 import ru.guardsystem.service.SessionManager;
 
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 
 public class GuardCommand implements TabExecutor {
@@ -19,11 +23,19 @@ public class GuardCommand implements TabExecutor {
     private final GuardManager guardManager;
     private final SessionManager sessionManager;
     private final CoreProtectService coreProtectService;
+    private final GuardGuiService guardGuiService;
+    private final GuardPermissionService guardPermissionService;
 
-    public GuardCommand(GuardManager guardManager, SessionManager sessionManager, CoreProtectService coreProtectService) {
+    public GuardCommand(GuardManager guardManager,
+                        SessionManager sessionManager,
+                        CoreProtectService coreProtectService,
+                        GuardGuiService guardGuiService,
+                        GuardPermissionService guardPermissionService) {
         this.guardManager = guardManager;
         this.sessionManager = sessionManager;
         this.coreProtectService = coreProtectService;
+        this.guardGuiService = guardGuiService;
+        this.guardPermissionService = guardPermissionService;
     }
 
     @Override
@@ -34,12 +46,15 @@ public class GuardCommand implements TabExecutor {
         }
 
         if (args.length == 0) {
-            sender.sendMessage("Использование: /guard inspect <player> <radius> <hours> | /guard rollback <request|execute|status> ...");
+            sender.sendMessage("Использование: /guard gui | /guard admin <add|remove> <player> | /guard transfer <player> | /guard rollback <request|execute|status>");
             return true;
         }
 
         return switch (args[0].toLowerCase()) {
-            case "inspect" -> handleInspect(player, args);
+            case "gui" -> handleGui(player);
+            case "admin" -> handleAdmin(player, args);
+            case "transfer" -> handleTransfer(player, args);
+            case "inspect" -> handleInspect(player);
             case "rollback" -> handleRollback(player, args);
             default -> {
                 sender.sendMessage("Неизвестная подкоманда guard.");
@@ -48,28 +63,84 @@ public class GuardCommand implements TabExecutor {
         };
     }
 
-    private boolean handleInspect(Player sender, String[] args) {
-        if (args.length != 4) {
-            sender.sendMessage("Использование: /guard inspect <player> <radius> <hours>");
+    private boolean handleGui(Player sender) {
+        guardGuiService.openMainMenu(sender);
+        return true;
+    }
+
+    private boolean handleInspect(Player sender) {
+        sender.sendMessage("Guard теперь могут использовать CoreProtect напрямую: /co inspect");
+        return true;
+    }
+
+    private boolean handleAdmin(Player sender, String[] args) {
+        if (!sender.isOp()) {
+            sender.sendMessage("Эта команда доступна только OP-админам.");
+            return true;
+        }
+
+        if (args.length != 3) {
+            sender.sendMessage("Использование: /guard admin <add|remove> <player>");
+            return true;
+        }
+
+        String action = args[1].toLowerCase();
+        String target = args[2];
+        boolean changed;
+
+        if ("add".equals(action)) {
+            changed = guardManager.addGuard(target);
+            sender.sendMessage(changed ? "Игрок " + target + " добавлен в Guard." : "Игрок уже находится в Guard.");
+        } else if ("remove".equals(action)) {
+            changed = guardManager.removeGuard(target);
+            sender.sendMessage(changed ? "Игрок " + target + " удалён из Guard." : "Игрок не состоит в Guard.");
+        } else {
+            sender.sendMessage("Использование: /guard admin <add|remove> <player>");
+            return true;
+        }
+
+        guardManager.save();
+        Player onlineTarget = Bukkit.getPlayerExact(target);
+        if (onlineTarget != null) {
+            guardPermissionService.syncPlayer(onlineTarget);
+        }
+        return true;
+    }
+
+    private boolean handleTransfer(Player sender, String[] args) {
+        if (!guardManager.isGuard(sender.getName())) {
+            sender.sendMessage("Передавать роль могут только Guard.");
+            return true;
+        }
+
+        if (args.length != 2) {
+            sender.sendMessage("Использование: /guard transfer <player>");
             return true;
         }
 
         String target = args[1];
-        Integer radius = parsePositiveInt(args[2]);
-        Integer hours = parsePositiveInt(args[3]);
-        if (radius == null || hours == null) {
-            sender.sendMessage("radius/hours должны быть положительными числами.");
+        if (sender.getName().equalsIgnoreCase(target)) {
+            sender.sendMessage("Нельзя передать роль самому себе.");
             return true;
         }
 
-        int seconds = Math.toIntExact(Duration.of(hours, ChronoUnit.HOURS).toSeconds());
-        if (!sessionManager.validateRollbackLimits(radius, seconds)) {
-            sender.sendMessage("Лимиты превышены: radius <= 50, глубина <= 7 дней.");
+        if (guardManager.isGuard(target)) {
+            sender.sendMessage("Этот игрок уже Guard.");
             return true;
         }
 
-        List<?> results = coreProtectService.inspect(sender, target, radius, seconds, sender.getLocation());
-        sender.sendMessage("Inspect result count: " + results.size());
+        if (!guardManager.transferGuardRole(sender.getName(), target)) {
+            sender.sendMessage("Не удалось передать роль Guard.");
+            return true;
+        }
+
+        guardManager.save();
+        guardPermissionService.syncPlayer(sender);
+        Player onlineTarget = Bukkit.getPlayerExact(target);
+        if (onlineTarget != null) {
+            guardPermissionService.syncPlayer(onlineTarget);
+        }
+        sender.sendMessage("Роль Guard передана игроку " + target + ".");
         return true;
     }
 
@@ -172,11 +243,28 @@ public class GuardCommand implements TabExecutor {
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (args.length == 1) {
-            return List.of("inspect", "rollback");
+            return List.of("gui", "admin", "transfer", "rollback");
         }
+
+        if (args.length == 2 && "admin".equalsIgnoreCase(args[0])) {
+            return List.of("add", "remove");
+        }
+
         if (args.length == 2 && "rollback".equalsIgnoreCase(args[0])) {
             return List.of("request", "execute", "status");
         }
+
+        if (args.length == 3 && "admin".equalsIgnoreCase(args[0])) {
+            return new ArrayList<>(Bukkit.getOnlinePlayers().stream().map(Player::getName).toList());
+        }
+
+        if (args.length == 2 && "transfer".equalsIgnoreCase(args[0])) {
+            return Bukkit.getOnlinePlayers().stream()
+                .map(Player::getName)
+                .filter(name -> !guardManager.isGuard(name))
+                .toList();
+        }
+
         return List.of();
     }
 }
