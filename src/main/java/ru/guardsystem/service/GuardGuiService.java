@@ -45,6 +45,7 @@ public class GuardGuiService {
         voteManager.activeSnapshot().ifPresent(snapshot -> inventory.setItem(14, menuItem(Material.CLOCK, "§6Активное голосование",
                 "§7Тип: §f" + voteManager.label(snapshot.type()),
                 "§7Цель: §f" + snapshot.target(),
+                "§7Причина: §f" + snapshot.reason(),
                 "§7Да: §a" + snapshot.yes() + "  §7Нет: §c" + snapshot.no(),
                 "§7Осталось: §f" + snapshot.secondsLeft() + "с")));
 
@@ -99,6 +100,12 @@ public class GuardGuiService {
             inventory.setItem(slot, playerHead("§6" + confiscated.playerName(),
                     "§7Причина: §f" + confiscated.reason(),
                     "§7Вещей: §f" + confiscated.items().size(),
+                    confiscated.returnedToWorld()
+                            ? "§aСтатус: ✔ Возвращено в мир"
+                            : "§eСтатус: Не возвращено",
+                    confiscated.returnedBy() == null
+                            ? "§7Отметка: §f-"
+                            : "§7Отметил: §f" + confiscated.returnedBy(),
                     "§7Нажмите, чтобы открыть"));
             slot++;
         }
