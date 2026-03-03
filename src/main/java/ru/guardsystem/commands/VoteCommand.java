@@ -27,7 +27,7 @@ public class VoteCommand implements TabExecutor {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (args.length != 1 || (!"yes".equalsIgnoreCase(args[0]) && !"no".equalsIgnoreCase(args[0]))) {
-            sender.sendMessage("Использование: /vote <yes|no>");
+            sender.sendMessage("Использование: /vote <yes|no> (yes=за, no=против)");
             return true;
         }
 
@@ -48,8 +48,8 @@ public class VoteCommand implements TabExecutor {
             return true;
         }
 
-        sender.sendMessage("Голос принят. yes=" + result.yesVotes() + " no=" + result.noVotes() +
-            " required=" + result.requiredVotes() + " (activeGuards=" + result.activeGuards() + ")");
+        sender.sendMessage("Голос принят. за=" + result.yesVotes() + " против=" + result.noVotes() +
+            " нужно=" + result.requiredVotes() + " (активных Guard=" + result.activeGuards() + ")");
 
         if (result.session().isApproved()) {
             sender.sendMessage("ROLLBACK-сессия одобрена. Доступно: /guard rollback execute");

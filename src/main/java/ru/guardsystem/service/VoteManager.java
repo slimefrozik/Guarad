@@ -1,5 +1,6 @@
 package ru.guardsystem.service;
 
+import org.bukkit.BanList;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -9,7 +10,6 @@ import org.bukkit.scheduler.BukkitTask;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -47,24 +47,30 @@ public class VoteManager {
     private final PersistenceLayer persistenceLayer;
     private final AuditLogger auditLogger;
     private final GuardManager guardManager;
+    private final BanInventoryService banInventoryService;
 
     private ActiveVote activeVote;
 
-    public VoteManager(JavaPlugin plugin, PersistenceLayer persistenceLayer, AuditLogger auditLogger, GuardManager guardManager) {
+    public VoteManager(JavaPlugin plugin,
+                       PersistenceLayer persistenceLayer,
+                       AuditLogger auditLogger,
+                       GuardManager guardManager,
+                       BanInventoryService banInventoryService) {
         this.plugin = plugin;
         this.persistenceLayer = persistenceLayer;
         this.auditLogger = auditLogger;
         this.guardManager = guardManager;
+        this.banInventoryService = banInventoryService;
     }
 
     public void load() {
         persistenceLayer.loadVotesJson();
-        auditLogger.log("VoteManager initialized");
+        auditLogger.log("VoteManager инициализирован");
     }
 
     public void save() {
         persistenceLayer.saveVotesJson("{\n  \"votes\": []\n}\n");
-        auditLogger.log("VoteManager save called");
+        auditLogger.log("VoteManager сохранён");
     }
 
     public synchronized Optional<String> startVote(VoteType type,
@@ -73,7 +79,7 @@ public class VoteManager {
                                                    CommandSender initiator,
                                                    Predicate<Player> eligibilityRule) {
         if (activeVote != null) {
-            return Optional.of("[Vote] Уже идёт голосование: " + shortLabel(activeVote.type) + " " + activeVote.target);
+            return Optional.of("[Голосование] Уже идёт голосование: " + label(activeVote.type) + " " + activeVote.target);
         }
 
         String initiatorName = initiator.getName();
@@ -81,22 +87,22 @@ public class VoteManager {
         vote.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> expireVote(vote), DEFAULT_DURATION_SECONDS * 20L);
         activeVote = vote;
 
-        auditLogger.log("Vote started: " + type + " target=" + target + " by=" + initiatorName + " reason=" + reason);
+        auditLogger.log("Старт голосования: " + type + " цель=" + target + " инициатор=" + initiatorName + " причина=" + reason);
         return Optional.empty();
     }
 
     public synchronized VoteResult castVote(Player voter, VoteChoice choice) {
         if (activeVote == null) {
-            return VoteResult.error("[Vote] Нет активного голосования.");
+            return VoteResult.error("[Голосование] Нет активного голосования.");
         }
         if (!activeVote.eligibilityRule.test(voter)) {
-            return VoteResult.error("[Vote] У вас нет права голоса в этом голосовании.");
+            return VoteResult.error("[Голосование] У вас нет права голоса в этом голосовании.");
         }
 
         activeVote.ballots.put(voter.getUniqueId(), choice);
         VoteSnapshot snapshot = snapshot();
-        return VoteResult.ok("[Vote] Принято: " + choice.name().toLowerCase(Locale.ROOT)
-                + " | yes=" + snapshot.yes + " no=" + snapshot.no + " total=" + snapshot.total
+        return VoteResult.ok("[Голосование] Принято: " + (choice == VoteChoice.YES ? "за" : "против")
+                + " | за=" + snapshot.yes + " против=" + snapshot.no + " всего=" + snapshot.total
                 + " | осталось " + snapshot.secondsLeft + "с");
     }
 
@@ -113,8 +119,16 @@ public class VoteManager {
             current.timeoutTask.cancel();
         }
         activeVote = null;
-        Bukkit.broadcastMessage("[Vote] Аннулирован: " + shortLabel(current.type) + " " + current.target + " (" + reason + ")");
-        auditLogger.log("Vote cancelled: " + current.type + " target=" + current.target + " reason=" + reason);
+        Bukkit.broadcastMessage("[Голосование] Аннулировано: " + label(current.type) + " " + current.target + " (" + reason + ")");
+        auditLogger.log("Голосование отменено: " + current.type + " цель=" + current.target + " причина=" + reason);
+    }
+
+    public String label(VoteType type) {
+        return switch (type) {
+            case VOTEBAN -> "VoteBan";
+            case GUARD_NOMINATE, OPEN_GUARD_NOMINATE -> "Назначение Guard";
+            case GUARD_IMPEACH -> "Снятие Guard";
+        };
     }
 
     private synchronized void expireVote(ActiveVote vote) {
@@ -127,13 +141,13 @@ public class VoteManager {
 
         if (accepted && snapshot != null) {
             applyOutcome(snapshot);
-            Bukkit.broadcastMessage("[Vote] Принят: " + shortLabel(snapshot.type) + " " + snapshot.target
-                    + " | yes=" + snapshot.yes + " no=" + snapshot.no);
-            auditLogger.log("Vote accepted: " + snapshot.type + " target=" + snapshot.target);
+            Bukkit.broadcastMessage("[Голосование] Принято: " + label(snapshot.type) + " " + snapshot.target
+                    + " | за=" + snapshot.yes + " против=" + snapshot.no);
+            auditLogger.log("Голосование принято: " + snapshot.type + " цель=" + snapshot.target);
         } else if (snapshot != null) {
-            Bukkit.broadcastMessage("[Vote] Отклонён: " + shortLabel(snapshot.type) + " " + snapshot.target
-                    + " | yes=" + snapshot.yes + " no=" + snapshot.no);
-            auditLogger.log("Vote rejected: " + snapshot.type + " target=" + snapshot.target);
+            Bukkit.broadcastMessage("[Голосование] Отклонено: " + label(snapshot.type) + " " + snapshot.target
+                    + " | за=" + snapshot.yes + " против=" + snapshot.no);
+            auditLogger.log("Голосование отклонено: " + snapshot.type + " цель=" + snapshot.target);
         }
 
         activeVote = null;
@@ -146,7 +160,15 @@ public class VoteManager {
             case VOTEBAN -> {
                 Player online = Bukkit.getPlayerExact(snapshot.target);
                 if (online != null) {
-                    online.kickPlayer("VoteBan: " + snapshot.reason);
+                    banInventoryService.handleOnlineBan(online);
+                } else {
+                    banInventoryService.handleOfflineBan(snapshot.target, snapshot.reason);
+                }
+
+                Bukkit.getBanList(BanList.Type.NAME).addBan(snapshot.target, "VoteBan: " + snapshot.reason, null, "GuardSystem");
+                Player targetOnline = Bukkit.getPlayerExact(snapshot.target);
+                if (targetOnline != null && targetOnline.isOnline()) {
+                    targetOnline.kickPlayer("Вы забанены голосованием. Причина: " + snapshot.reason);
                 }
             }
         }
@@ -168,14 +190,6 @@ public class VoteManager {
 
         long left = Math.max(0, Duration.between(Instant.now(), activeVote.deadline).toSeconds());
         return new VoteSnapshot(activeVote.type, activeVote.target, activeVote.reason, yes, no, yes + no, left, activeVote.initiator);
-    }
-
-    private String shortLabel(VoteType type) {
-        return switch (type) {
-            case VOTEBAN -> "voteban";
-            case GUARD_NOMINATE, OPEN_GUARD_NOMINATE -> "guard nominate";
-            case GUARD_IMPEACH -> "guard impeach";
-        };
     }
 
     public record VoteResult(boolean success, String message) {

@@ -25,7 +25,7 @@ public class VoteBanCommand implements TabExecutor {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (args.length < 2) {
-            sender.sendMessage("[VoteBan] Использование: /voteban <nick> <reason>");
+            sender.sendMessage("[VoteBan] Использование: /voteban <ник> <причина>");
             return true;
         }
 
@@ -46,8 +46,8 @@ public class VoteBanCommand implements TabExecutor {
         }
 
         voteManager.activeSnapshot().ifPresent(snapshot ->
-                sender.sendMessage("[VoteBan] Старт: target=" + snapshot.target() + " reason=" + snapshot.reason()
-                        + " | yes=0 no=0 | таймер=" + snapshot.secondsLeft() + "с"));
+                sender.sendMessage("[VoteBan] Старт: цель=" + snapshot.target() + " | причина=" + snapshot.reason()
+                        + " | за=0 против=0 | таймер=" + snapshot.secondsLeft() + "с"));
         return true;
     }
 
