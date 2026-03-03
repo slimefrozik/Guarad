@@ -5,23 +5,19 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public class GuardManager {
-
-    private static final int MAX_GUARDS = 3;
-    private static final Duration INACTIVITY_TIMEOUT = Duration.ofDays(30);
 
     private final PersistenceLayer persistenceLayer;
     private final AuditLogger auditLogger;
     private YamlConfiguration guardsConfiguration;
-    private List<String> guards = List.of();
+    private Set<String> guards = Set.of();
 
     public GuardManager(PersistenceLayer persistenceLayer, AuditLogger auditLogger) {
         this.persistenceLayer = persistenceLayer;
@@ -34,7 +30,7 @@ public class GuardManager {
         this.guards = configuredGuards.stream()
             .map(name -> name.toLowerCase(Locale.ROOT))
             .distinct()
-            .toList();
+            .collect(Collectors.toCollection(LinkedHashSet::new));
         auditLogger.log("GuardManager loaded guards.yml with guards=" + this.guards.size());
     }
 
@@ -87,10 +83,6 @@ public class GuardManager {
             }
         }
         return active;
-    }
-
-    public boolean isGuard(String playerName) {
-        return guards.contains(playerName.toLowerCase(Locale.ROOT));
     }
 
     public int getConfiguredGuardCount() {
