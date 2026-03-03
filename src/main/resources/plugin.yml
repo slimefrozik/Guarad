@@ -5,11 +5,11 @@ api-version: '1.21'
 author: GuardSystem
 commands:
   voteban:
-    description: Start or inspect vote-ban process.
-    usage: /voteban
+    description: Start vote-ban for a player.
+    usage: /voteban <nick> <reason>
   vote:
-    description: Cast a vote in active vote-ban session.
+    description: Cast a vote in active session.
     usage: /vote <yes|no>
   guard:
-    description: Manage guard governance module.
-    usage: /guard
+    description: Manage guard governance voting.
+    usage: /guard <nominate|impeach> <nick>

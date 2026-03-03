@@ -1,217 +1,215 @@
 package ru.guardsystem.service;
 
+import org.bukkit.Bukkit;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
+import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
+
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 public class VoteManager {
 
-    private static final Duration BAN_TIMEOUT = Duration.ofMinutes(10);
-    private static final Duration BAN_COOLDOWN = Duration.ofHours(48);
-    private static final Duration NOMINATION_CONFIRMATION_WINDOW = Duration.ofHours(24);
+    public enum VoteChoice {
+        YES,
+        NO
+    }
 
+    public enum VoteType {
+        VOTEBAN,
+        GUARD_NOMINATE,
+        GUARD_IMPEACH,
+        OPEN_GUARD_NOMINATE
+    }
+
+    public record VoteSnapshot(
+            VoteType type,
+            String target,
+            String reason,
+            int yes,
+            int no,
+            int total,
+            long secondsLeft,
+            String initiator
+    ) {
+    }
+
+    private static final long DEFAULT_DURATION_SECONDS = 90;
+
+    private final JavaPlugin plugin;
     private final PersistenceLayer persistenceLayer;
     private final AuditLogger auditLogger;
     private final GuardManager guardManager;
 
-    private final Map<UUID, VoteSession> sessions = new LinkedHashMap<>();
-    private final Map<UUID, Instant> banCooldownUntil = new LinkedHashMap<>();
-    private String votesJson;
+    private ActiveVote activeVote;
 
-    public VoteManager(PersistenceLayer persistenceLayer, AuditLogger auditLogger, GuardManager guardManager) {
+    public VoteManager(JavaPlugin plugin, PersistenceLayer persistenceLayer, AuditLogger auditLogger, GuardManager guardManager) {
+        this.plugin = plugin;
         this.persistenceLayer = persistenceLayer;
         this.auditLogger = auditLogger;
         this.guardManager = guardManager;
     }
 
     public void load() {
-        this.votesJson = persistenceLayer.loadVotesJson();
-        auditLogger.logEvent("vote_result", "system-load", java.util.Map.of("message", "VoteManager loaded votes.json"));
+        persistenceLayer.loadVotesJson();
+        auditLogger.log("VoteManager initialized");
     }
 
     public void save() {
-        this.votesJson = buildDebugStateJson();
-        persistenceLayer.saveVotesJson(votesJson);
-        auditLogger.logEvent("vote_result", "system-save", java.util.Map.of("message", "VoteManager saved votes.json"));
+        persistenceLayer.saveVotesJson("{\n  \"votes\": []\n}\n");
+        auditLogger.log("VoteManager save called");
     }
 
-    public void startVoteBan(String sessionId, String initiator, String target) {
-        auditLogger.logEvent("voteban_initiated", sessionId, java.util.Map.of(
-                "initiator", initiator,
-                "target", target
-        ));
+    public synchronized Optional<String> startVote(VoteType type,
+                                                   String target,
+                                                   String reason,
+                                                   CommandSender initiator,
+                                                   Predicate<Player> eligibilityRule) {
+        if (activeVote != null) {
+            return Optional.of("[Vote] Уже идёт голосование: " + shortLabel(activeVote.type) + " " + activeVote.target);
+        }
+
+        String initiatorName = initiator.getName();
+        ActiveVote vote = new ActiveVote(type, target, reason, initiatorName, Instant.now().plusSeconds(DEFAULT_DURATION_SECONDS), eligibilityRule);
+        vote.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> expireVote(vote), DEFAULT_DURATION_SECONDS * 20L);
+        activeVote = vote;
+
+        auditLogger.log("Vote started: " + type + " target=" + target + " by=" + initiatorName + " reason=" + reason);
+        return Optional.empty();
     }
 
-    public void castVote(String sessionId, String voter, String choice) {
-        auditLogger.logEvent("vote_cast", sessionId, java.util.Map.of(
-                "voter", voter,
-                "choice", choice
-        ));
+    public synchronized VoteResult castVote(Player voter, VoteChoice choice) {
+        if (activeVote == null) {
+            return VoteResult.error("[Vote] Нет активного голосования.");
+        }
+        if (!activeVote.eligibilityRule.test(voter)) {
+            return VoteResult.error("[Vote] У вас нет права голоса в этом голосовании.");
+        }
+
+        activeVote.ballots.put(voter.getUniqueId(), choice);
+        VoteSnapshot snapshot = snapshot();
+        return VoteResult.ok("[Vote] Принято: " + choice.name().toLowerCase(Locale.ROOT)
+                + " | yes=" + snapshot.yes + " no=" + snapshot.no + " total=" + snapshot.total
+                + " | осталось " + snapshot.secondsLeft + "с");
     }
 
-    public void registerVoteResult(String sessionId, String result) {
-        auditLogger.logEvent("vote_result", sessionId, java.util.Map.of("result", result));
+    public synchronized Optional<VoteSnapshot> activeSnapshot() {
+        return Optional.ofNullable(snapshot());
     }
 
-    private void enforceTimeoutRules(VoteSession session) {
-        Instant now = Instant.now();
-        if (session.type() == VoteType.BAN && session.status() == SessionStatus.OPEN) {
-            if (session.createdAt().plus(BAN_TIMEOUT).isBefore(now)) {
-                session.setStatus(SessionStatus.ANNULLED);
-            }
+    public synchronized void cancelActiveVote(String reason) {
+        if (activeVote == null) {
+            return;
+        }
+        ActiveVote current = activeVote;
+        if (current.timeoutTask != null) {
+            current.timeoutTask.cancel();
+        }
+        activeVote = null;
+        Bukkit.broadcastMessage("[Vote] Аннулирован: " + shortLabel(current.type) + " " + current.target + " (" + reason + ")");
+        auditLogger.log("Vote cancelled: " + current.type + " target=" + current.target + " reason=" + reason);
+    }
+
+    private synchronized void expireVote(ActiveVote vote) {
+        if (activeVote != vote) {
             return;
         }
 
-        if (session.type() == VoteType.NOMINATION && session.status() == SessionStatus.AWAITING_CONFIRMATION) {
-            if (session.confirmationDeadline() != null && session.confirmationDeadline().isBefore(now)) {
-                session.setStatus(SessionStatus.EXPIRED);
+        VoteSnapshot snapshot = snapshot();
+        boolean accepted = snapshot != null && snapshot.yes > snapshot.no;
+
+        if (accepted && snapshot != null) {
+            applyOutcome(snapshot);
+            Bukkit.broadcastMessage("[Vote] Принят: " + shortLabel(snapshot.type) + " " + snapshot.target
+                    + " | yes=" + snapshot.yes + " no=" + snapshot.no);
+            auditLogger.log("Vote accepted: " + snapshot.type + " target=" + snapshot.target);
+        } else if (snapshot != null) {
+            Bukkit.broadcastMessage("[Vote] Отклонён: " + shortLabel(snapshot.type) + " " + snapshot.target
+                    + " | yes=" + snapshot.yes + " no=" + snapshot.no);
+            auditLogger.log("Vote rejected: " + snapshot.type + " target=" + snapshot.target);
+        }
+
+        activeVote = null;
+    }
+
+    private void applyOutcome(VoteSnapshot snapshot) {
+        switch (snapshot.type) {
+            case GUARD_NOMINATE, OPEN_GUARD_NOMINATE -> guardManager.addGuard(snapshot.target);
+            case GUARD_IMPEACH -> guardManager.removeGuard(snapshot.target);
+            case VOTEBAN -> {
+                Player online = Bukkit.getPlayerExact(snapshot.target);
+                if (online != null) {
+                    online.kickPlayer("VoteBan: " + snapshot.reason);
+                }
             }
         }
     }
 
-    private void resolveSession(VoteSession session) {
-        int activeGuards = Math.max(1, guardManager.getActiveGuardCount());
-        long yesVotes = session.votes().values().stream().filter(vote -> vote == VoteDecision.YES).count();
-        long noVotes = session.votes().values().stream().filter(vote -> vote == VoteDecision.NO).count();
+    private VoteSnapshot snapshot() {
+        if (activeVote == null) {
+            return null;
+        }
+        int yes = 0;
+        int no = 0;
+        for (VoteChoice value : activeVote.ballots.values()) {
+            if (value == VoteChoice.YES) {
+                yes++;
+            } else {
+                no++;
+            }
+        }
 
-        switch (session.type()) {
-            case BAN -> {
-                if (noVotes > 0) {
-                    session.setStatus(SessionStatus.REJECTED);
-                    return;
-                }
-                if (yesVotes >= activeGuards) {
-                    session.setStatus(SessionStatus.APPROVED);
-                }
-            }
-            case NOMINATION -> {
-                if (noVotes > 0) {
-                    session.setStatus(SessionStatus.REJECTED);
-                    return;
-                }
-                if (yesVotes >= activeGuards) {
-                    session.setStatus(SessionStatus.AWAITING_CONFIRMATION);
-                    session.setConfirmationDeadline(Instant.now().plus(NOMINATION_CONFIRMATION_WINDOW));
-                    guardManager.removeGuard(session.initiator());
-                }
-            }
-            case IMPEACHMENT -> {
-                int threshold = guardManager.getRequiredImpeachmentVotes();
-                if (yesVotes >= threshold) {
-                    guardManager.removeGuard(session.target());
-                    session.setStatus(SessionStatus.APPROVED);
-                } else if (noVotes > activeGuards - threshold) {
-                    session.setStatus(SessionStatus.REJECTED);
-                }
-            }
-            case ROLLBACK -> {
-                if (noVotes > 0) {
-                    session.setStatus(SessionStatus.REJECTED);
-                    return;
-                }
-                if (yesVotes >= activeGuards) {
-                    session.setStatus(SessionStatus.APPROVED);
-                }
-            }
-            default -> throw new IllegalStateException("Unhandled vote type: " + session.type());
+        long left = Math.max(0, Duration.between(Instant.now(), activeVote.deadline).toSeconds());
+        return new VoteSnapshot(activeVote.type, activeVote.target, activeVote.reason, yes, no, yes + no, left, activeVote.initiator);
+    }
+
+    private String shortLabel(VoteType type) {
+        return switch (type) {
+            case VOTEBAN -> "voteban";
+            case GUARD_NOMINATE, OPEN_GUARD_NOMINATE -> "guard nominate";
+            case GUARD_IMPEACH -> "guard impeach";
+        };
+    }
+
+    public record VoteResult(boolean success, String message) {
+        public static VoteResult ok(String message) {
+            return new VoteResult(true, message);
+        }
+
+        public static VoteResult error(String message) {
+            return new VoteResult(false, message);
         }
     }
 
-    private String buildDebugStateJson() {
-        StringBuilder builder = new StringBuilder();
-        builder.append("{\n  \"activeSessions\": ").append(sessions.size()).append(",\n");
-        builder.append("  \"sessions\": [\n");
-        int index = 0;
-        for (VoteSession session : sessions.values()) {
-            builder.append("    {\"id\":\"").append(session.id())
-                    .append("\",\"type\":\"").append(session.type())
-                    .append("\",\"status\":\"").append(session.status())
-                    .append("\"}");
-            if (++index < sessions.size()) {
-                builder.append(',');
-            }
-            builder.append("\n");
-        }
-        builder.append("  ]\n}\n");
-        return builder.toString();
-    }
-
-    public enum VoteType {
-        BAN,
-        NOMINATION,
-        IMPEACHMENT,
-        ROLLBACK
-    }
-
-    public enum VoteDecision {
-        YES,
-        NO
-    }
-
-    public enum SessionStatus {
-        OPEN,
-        AWAITING_CONFIRMATION,
-        APPROVED,
-        REJECTED,
-        ANNULLED,
-        EXPIRED
-    }
-
-    public static final class VoteSession {
-        private final UUID id;
+    private static final class ActiveVote {
         private final VoteType type;
-        private final UUID initiator;
-        private final UUID target;
-        private final Instant createdAt;
-        private final Map<UUID, VoteDecision> votes;
-        private SessionStatus status;
-        private Instant confirmationDeadline;
+        private final String target;
+        private final String reason;
+        private final String initiator;
+        private final Instant deadline;
+        private final Predicate<Player> eligibilityRule;
+        private final Map<UUID, VoteChoice> ballots = new HashMap<>();
+        private BukkitTask timeoutTask;
 
-        public VoteSession(UUID id, VoteType type, UUID initiator, UUID target, Instant createdAt, SessionStatus status) {
-            this.id = id;
+        private ActiveVote(VoteType type,
+                           String target,
+                           String reason,
+                           String initiator,
+                           Instant deadline,
+                           Predicate<Player> eligibilityRule) {
             this.type = type;
-            this.initiator = initiator;
             this.target = target;
-            this.createdAt = createdAt;
-            this.votes = new LinkedHashMap<>();
-            this.status = status;
-        }
-
-        public UUID id() { return id; }
-        public VoteType type() { return type; }
-        public UUID initiator() { return initiator; }
-        public UUID target() { return target; }
-        public Instant createdAt() { return createdAt; }
-        public Map<UUID, VoteDecision> votes() { return votes; }
-        public SessionStatus status() { return status; }
-        public Instant confirmationDeadline() { return confirmationDeadline; }
-        public void setStatus(SessionStatus status) { this.status = status; }
-        public void setConfirmationDeadline(Instant confirmationDeadline) { this.confirmationDeadline = confirmationDeadline; }
-    }
-
-    public record VoteCreateResult(boolean created, String reason, VoteSession session) {
-        static VoteCreateResult created(VoteSession session) {
-            return new VoteCreateResult(true, null, session);
-        }
-
-        static VoteCreateResult rejected(String reason) {
-            return new VoteCreateResult(false, reason, null);
-        }
-    }
-
-    public record VoteDecisionResult(boolean accepted, String reason, SessionStatus currentStatus) {
-        static VoteDecisionResult accepted(SessionStatus status) {
-            return new VoteDecisionResult(true, null, status);
-        }
-
-        static VoteDecisionResult rejected(String reason) {
-            return new VoteDecisionResult(false, reason, null);
+            this.reason = reason;
+            this.initiator = initiator;
+            this.deadline = deadline;
+            this.eligibilityRule = eligibilityRule;
         }
     }
 }
