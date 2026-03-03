@@ -23,12 +23,14 @@ public final class GuardGovernancePlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        saveDefaultConfig();
+
         this.persistenceLayer = new PersistenceLayer(this);
         this.persistenceLayer.initializeStorage();
 
         this.auditLogger = new AuditLogger(getDataFolder().toPath().resolve("logs"));
         this.guardManager = new GuardManager(persistenceLayer, auditLogger);
-        this.voteManager = new VoteManager(persistenceLayer, auditLogger);
+        this.voteManager = new VoteManager(this, persistenceLayer, auditLogger, guardManager);
         this.sessionManager = new SessionManager(auditLogger);
         this.coreProtectService = new CoreProtectService(this, auditLogger);
 

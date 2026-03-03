@@ -1,5 +1,7 @@
 package ru.guardsystem.commands;
 
+import org.bukkit.Bukkit;
+import org.bukkit.Statistic;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
@@ -13,9 +15,15 @@ import ru.guardsystem.service.SessionManager;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 public class GuardCommand implements TabExecutor {
 
+    private static final long MIN_ONLINE_DAYS_FOR_OPEN_VOTE = 30;
+
+    private final JavaPlugin plugin;
     private final GuardManager guardManager;
     private final SessionManager sessionManager;
     private final CoreProtectService coreProtectService;

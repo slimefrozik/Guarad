@@ -16,6 +16,7 @@ public class SessionManager {
 
     private RollbackSession rollbackSession;
     private int activeSessionCount;
+    private long sessionSequence;
 
     public SessionManager(AuditLogger auditLogger) {
         this.auditLogger = auditLogger;

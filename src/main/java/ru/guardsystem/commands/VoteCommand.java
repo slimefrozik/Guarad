@@ -3,12 +3,14 @@ package ru.guardsystem.commands;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
+import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import ru.guardsystem.service.GuardManager;
 import ru.guardsystem.service.SessionManager;
 
 import java.util.List;
+import java.util.Locale;
 
 public class VoteCommand implements TabExecutor {
 

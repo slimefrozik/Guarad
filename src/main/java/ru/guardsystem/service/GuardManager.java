@@ -8,7 +8,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.Locale;
+import java.util.Set;
+
 public class GuardManager {
+
+    private static final int MAX_GUARDS = 3;
+    private static final Duration INACTIVITY_TIMEOUT = Duration.ofDays(30);
 
     private final PersistenceLayer persistenceLayer;
     private final AuditLogger auditLogger;
@@ -39,8 +47,36 @@ public class GuardManager {
         auditLogger.log("GuardManager saved guards.yml");
     }
 
-    public void touch() {
-        auditLogger.log("GuardManager touch called");
+    public boolean isGuard(String nickname) {
+        return guards.contains(normalize(nickname));
+    }
+
+    public int guardCount() {
+        return guards.size();
+    }
+
+    public boolean addGuard(String nickname) {
+        boolean changed = guards.add(normalize(nickname));
+        if (changed) {
+            auditLogger.log("Guard added: " + nickname);
+        }
+        return changed;
+    }
+
+    public boolean removeGuard(String nickname) {
+        boolean changed = guards.remove(normalize(nickname));
+        if (changed) {
+            auditLogger.log("Guard removed: " + nickname);
+        }
+        return changed;
+    }
+
+    public Collection<String> listGuards() {
+        return Set.copyOf(guards);
+    }
+
+    private String normalize(String nickname) {
+        return nickname.toLowerCase(Locale.ROOT);
     }
 
     public int getActiveGuardCount() {
