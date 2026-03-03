@@ -6,6 +6,7 @@ import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import ru.guardsystem.service.SessionManager;
 import ru.guardsystem.service.VoteManager;
 
 import java.util.List;
@@ -15,9 +16,11 @@ public class VoteCommand implements TabExecutor {
 
     private static final List<String> OPTIONS = List.of("yes", "no");
     private final VoteManager voteManager;
+    private final SessionManager sessionManager;
 
-    public VoteCommand(VoteManager voteManager) {
+    public VoteCommand(VoteManager voteManager, SessionManager sessionManager) {
         this.voteManager = voteManager;
+        this.sessionManager = sessionManager;
     }
 
     @Override

@@ -9,6 +9,9 @@ import java.util.Set;
 
 public class GuardManager {
 
+    private static final int MAX_GUARDS = 3;
+    private static final Duration INACTIVITY_TIMEOUT = Duration.ofDays(30);
+
     private final PersistenceLayer persistenceLayer;
     private final AuditLogger auditLogger;
     private final Set<String> guards = new LinkedHashSet<>();
